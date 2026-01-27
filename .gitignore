@@ -44,3 +44,8 @@ terraform.rc
 .env
 __pycache__/
 .DS_Store
+
+# Kubernetes Config (Secrets)
+switchlang-cluster-config
+*-config
+*.kubeconfig
