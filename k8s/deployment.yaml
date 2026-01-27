@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: switchlang-app
+  labels:
+    app: switchlang
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: switchlang
+  template:
+    metadata:
+      labels:
+        app: switchlang
+    spec:
+      containers:
+      - name: switchlang
+        image: switchlang:v1
+        imagePullPolicy: IfNotPresent  # [!] use local image first
+        ports:
+        - containerPort: 8501          # Streamlit default port
+        env:
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: switchlang-secret  # the secret name that is created by kubectl create secret
+              key: GEMINI_API_KEY
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
