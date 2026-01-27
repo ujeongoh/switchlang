@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: switchlang-svc
+spec:
+  selector:
+    app: switchlang  # it has to match the label in Deployment
+  ports:
+    - protocol: TCP
+      port: 80       # service port (Ingress sends requests to this port)
+      targetPort: 8501 # actual container port (Streamlit)
+  type: ClusterIP    # no external exposure, only internal cluster communication
