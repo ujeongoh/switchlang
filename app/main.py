@@ -4,41 +4,55 @@ import os
 
 # 1. Page Configuration
 st.set_page_config(
-    page_title="SwitchLang AI Tutor v3",
+    page_title="SwitchLang AI Tutor v3.5",
     page_icon="🧠",
     layout="wide"
 )
 
-# 2. Gemini API Setup
+# 2. Gemini API Setup (Client-based for google-genai SDK)
 api_key = os.getenv("GEMINI_API_KEY")
 if not api_key:
     st.error("🚨 GEMINI_API_KEY environment variable is missing.")
     st.stop()
 
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-3-flash-preview')
+client = genai.Client(api_key=api_key)
+MODEL_NAME = 'gemini-3-flash-preview' 
 
 # 3. Initialize Session State
 if 'quiz_data' not in st.session_state:
-    st.session_state['quiz_data'] = []  # List of dicts: {source, user_input, feedback}
+    st.session_state['quiz_data'] = []
 if 'mode' not in st.session_state:
     st.session_state['mode'] = "init" 
 
 # --- Helper Functions ---
 
-def generate_expressions(src_lang, count):
-    """Request Gemini to list common daily expressions."""
+def generate_expressions(src_lang, count, difficulty):
+    """Request Gemini to list expressions based on difficulty."""
+    
+    # Dynamic prompt based on difficulty level
+    difficulty_instruction = ""
+    if difficulty == "Beginner":
+        difficulty_instruction = "Use simple, essential daily phrases for survival and basic greetings."
+    elif difficulty == "Intermediate":
+        difficulty_instruction = "Use natural conversational sentences expressing feelings, opinions, or situations. Avoid 1-word greetings."
+    elif difficulty == "Advanced":
+        difficulty_instruction = "Use sophisticated vocabulary, idioms, slangs, or professional business expressions. The sentences should sound like a native speaker."
+
     prompt = f"""
-    List {count} common, useful daily life expressions used in {src_lang}.
-    Do not include translations.
+    List {count} useful expressions used in {src_lang}.
+    
+    Target Level: {difficulty}
+    Style Guide: {difficulty_instruction}
+    
+    Constraint: Do not include translations. Just the list of source text.
     Output format: A simple list separated by newlines.
-    Example:
-    Hello
-    How are you?
     """
+    
     try:
-        response = model.generate_content(prompt)
-        # Split by newline and strip whitespace
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt
+        )
         expressions = [line.strip() for line in response.text.split('\n') if line.strip()]
         return expressions
     except Exception as e:
@@ -64,10 +78,13 @@ def get_evaluation(src_text, user_text, src_lang, tgt_lang):
     3. Keep the feedback concise (max 2 sentences).
     """
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt
+        )
         return response.text
     except Exception as e:
-        return "Error during evaluation."
+        return f"Error during evaluation: {str(e)}"
 
 # --- UI Layout ---
 
@@ -78,7 +95,16 @@ st.markdown("Interactive Language Writing Training with AI")
 with st.sidebar:
     st.header("⚙️ Settings")
     input_lang = st.selectbox("Input Language (Source)", ["Korean", "English", "Japanese", "Spanish"], index=0)
-    output_lang = st.selectbox("Output Language (Target)", ["English", "Korean", "Japanese", "Spanish"], index=1)
+    output_lang = st.selectbox("Output Language (Target)", ["Korean", "English", "Japanese", "Spanish"], index=1)
+    
+    st.divider()
+    
+    # Difficulty Selector (New Feature)
+    difficulty = st.select_slider(
+        "Difficulty Level",
+        options=["Beginner", "Intermediate", "Advanced"],
+        value="Intermediate"
+    )
     
     st.divider()
     st.markdown("**Feature Selection**")
@@ -89,12 +115,15 @@ with st.sidebar:
 # Mode 1: AI Generated
 if mode == "1. AI Generated Questions":
     st.subheader(f"🤖 Translate {input_lang} expressions into {output_lang}")
+    st.caption(f"Current Level: {difficulty}")
     
-    num_questions = st.number_input("Number of expressions (n)", min_value=1, max_value=50, value=20)
+    num_questions = st.number_input("Number of expressions (n)", min_value=1, max_value=50, value=10)
     
     if st.button("Generate New Questions (Reset)"):
-        with st.spinner("AI is extracting expressions..."):
-            expressions = generate_expressions(input_lang, num_questions)
+        with st.spinner(f"AI is extracting {difficulty} expressions..."):
+            # Pass difficulty to function
+            expressions = generate_expressions(input_lang, num_questions, difficulty)
+            
             # Reset session data
             st.session_state['quiz_data'] = [{"source": exp, "user_input": "", "feedback": None} for exp in expressions]
             st.rerun()
@@ -106,7 +135,7 @@ elif mode == "2. Custom Input Questions":
     user_source_text = st.text_area(
         "Enter sentences to practice (one per line)", 
         height=150, 
-        placeholder="Hello\nHow is the weather today?\nWhat should we eat for lunch?"
+        placeholder="Example:\nIt's raining cats and dogs.\nCould you loop me in on that email?\nI'm on the fence about it."
     )
     
     if st.button("Start Practice"):
@@ -168,7 +197,6 @@ if st.session_state['quiz_data']:
     if st.button("Check All Answers"):
         progress_bar = st.progress(0)
         for i, item in enumerate(st.session_state['quiz_data']):
-            # Check only unchecked items that have input
             if not item['feedback'] and item['user_input']: 
                 feedback = get_evaluation(item['source'], item['user_input'], input_lang, output_lang)
                 st.session_state['quiz_data'][i]['feedback'] = feedback
