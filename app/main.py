@@ -1,111 +1,179 @@
 import streamlit as st
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 import os
-import json
-import pandas as pd
-from dotenv import load_dotenv
 
-# 1. Load Environment Variables
-load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
-
-# 2. Configure Streamlit Page
+# 1. Page Configuration
 st.set_page_config(
-    page_title="SwitchLang AI Tutor",
-    page_icon="🔄",
+    page_title="SwitchLang AI Tutor v3",
+    page_icon="🧠",
     layout="wide"
 )
 
-# 3. Initialize Gemini Client (New SDK Style)
+# 2. Gemini API Setup
+api_key = os.getenv("GEMINI_API_KEY")
 if not api_key:
-    st.error("Error: GEMINI_API_KEY not found in .env file.")
-    client = None
-else:
-    client = genai.Client(api_key=api_key)
+    st.error("🚨 GEMINI_API_KEY environment variable is missing.")
+    st.stop()
 
-# 4. Helper Function: Call Gemini API
-def get_ai_feedback(user_text, input_lang, output_lang):
-    """
-    Sends the user's text to gemini.
-    """
-    if not client:
-        return {"error": "API Key missing"}
+genai.configure(api_key=api_key)
+model = genai.GenerativeModel('gemini-pro')
 
+# 3. Initialize Session State
+if 'quiz_data' not in st.session_state:
+    st.session_state['quiz_data'] = []  # List of dicts: {source, user_input, feedback}
+if 'mode' not in st.session_state:
+    st.session_state['mode'] = "init" 
+
+# --- Helper Functions ---
+
+def generate_expressions(src_lang, count):
+    """Request Gemini to list common daily expressions."""
     prompt = f"""
-    You are a professional language tutor.
-    The user is practicing converting sentences from {input_lang} to {output_lang}.
-    
-    Analyze the following text: "{user_text}"
-    
-    Your task:
-    1. Identify the intent of the text.
-    2. Provide a natural translation in {output_lang}.
-    3. If the input was already in {output_lang}, correct the grammar and nuance.
-    4. Provide a brief explanation.
-    
-    Output must be a valid JSON object with keys:
-    - original_text
-    - improved_text
-    - explanation
-    - score (1-5 integer)
+    List {count} common, useful daily life expressions used in {src_lang}.
+    Do not include translations.
+    Output format: A simple list separated by newlines.
+    Example:
+    Hello
+    How are you?
     """
-
     try:
-        response = client.models.generate_content(
-            model='gemini-3-flash-preview', 
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            )
-        )
-        
-        return json.loads(response.text)
-        
+        response = model.generate_content(prompt)
+        # Split by newline and strip whitespace
+        expressions = [line.strip() for line in response.text.split('\n') if line.strip()]
+        return expressions
     except Exception as e:
-        return {"error": str(e)}
+        st.error(f"Error generating expressions: {e}")
+        return []
 
-# 5. UI Layout (Sidebar)
-with st.sidebar:
-    st.title("🔄 SwitchLang")
-    st.caption("Powered by Google Gemini 3.0 Flash")
+def get_evaluation(src_text, user_text, src_lang, tgt_lang):
+    """Evaluate user's translation."""
+    if not user_text:
+        return "No input provided."
     
-    st.header("Settings")
-    input_lang = st.selectbox("Input Language", ["Korean", "English", "Japanese", "Spanish"], index=0)
-    output_lang = st.selectbox("Target Language", ["English", "Korean", "Japanese", "Spanish"], index=1)
+    prompt = f"""
+    Task: Evaluate a language translation practice.
+    
+    Source Language: {src_lang}
+    Target Language: {tgt_lang}
+    
+    Source Text: "{src_text}"
+    User's Translation: "{user_text}"
+    
+    1. Is the user's translation grammatically and contextually correct? (Yes/No)
+    2. If No or if it can be improved, provide the most natural native translation.
+    3. Keep the feedback concise (max 2 sentences).
+    """
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return "Error during evaluation."
+
+# --- UI Layout ---
+
+st.title("🧠 SwitchLang: Active Recall Practice")
+st.markdown("Interactive Language Writing Training with AI")
+
+# Sidebar Settings
+with st.sidebar:
+    st.header("⚙️ Settings")
+    input_lang = st.selectbox("Input Language (Source)", ["Korean", "English", "Japanese", "Spanish"], index=0)
+    output_lang = st.selectbox("Output Language (Target)", ["English", "Korean", "Japanese", "Spanish"], index=1)
     
     st.divider()
-    st.info(f"Mode: {input_lang} ➡ {output_lang}")
+    st.markdown("**Feature Selection**")
+    mode = st.radio("Select Mode", ["1. AI Generated Questions", "2. Custom Input Questions"])
 
-# 6. UI Layout (Main Area)
-st.title("Active Recall Practice 📝")
-st.write("Type a sentence, and AI will polish or translate it for you.")
+# --- Main Logic ---
 
-# User Input
-user_input = st.text_area("Enter your sentence:", height=100, placeholder="e.g., 오늘 회의가 3시로 미뤄졌어.")
+# Mode 1: AI Generated
+if mode == "1. AI Generated Questions":
+    st.subheader(f"🤖 Translate {input_lang} expressions into {output_lang}")
+    
+    num_questions = st.number_input("Number of expressions (n)", min_value=1, max_value=50, value=20)
+    
+    if st.button("Generate New Questions (Reset)"):
+        with st.spinner("AI is extracting expressions..."):
+            expressions = generate_expressions(input_lang, num_questions)
+            # Reset session data
+            st.session_state['quiz_data'] = [{"source": exp, "user_input": "", "feedback": None} for exp in expressions]
+            st.rerun()
 
-if st.button("Switch & Check ✨", type="primary"):
-    if not user_input:
-        st.warning("Please enter a sentence first.")
-    else:
-        with st.spinner("AI is analyzing..."):
-            result = get_ai_feedback(user_input, input_lang, output_lang)
+# Mode 2: Custom Input
+elif mode == "2. Custom Input Questions":
+    st.subheader(f"✍️ Practice Custom Sentences ({input_lang})")
+    
+    user_source_text = st.text_area(
+        "Enter sentences to practice (one per line)", 
+        height=150, 
+        placeholder="Hello\nHow is the weather today?\nWhat should we eat for lunch?"
+    )
+    
+    if st.button("Start Practice"):
+        lines = [line.strip() for line in user_source_text.split('\n') if line.strip()]
+        if lines:
+            st.session_state['quiz_data'] = [{"source": line, "user_input": "", "feedback": None} for line in lines]
+            st.rerun()
+        else:
+            st.warning("Please enter at least one sentence.")
+
+# --- Quiz Interface (Common) ---
+
+st.divider()
+
+if st.session_state['quiz_data']:
+    st.write(f"### 📝 Practice Table ({len(st.session_state['quiz_data'])} Questions)")
+    
+    # Table Headers
+    col1, col2, col3 = st.columns([1, 1.5, 1.5])
+    col1.markdown(f"**Source ({input_lang})**")
+    col2.markdown(f"**Your Translation ({output_lang})**")
+    col3.markdown("**AI Feedback**")
+    
+    # Render List
+    for i, item in enumerate(st.session_state['quiz_data']):
+        with st.container():
+            c1, c2, c3 = st.columns([1, 1.5, 1.5])
             
-            if "error" in result:
-                st.error(f"AI Error: {result['error']}")
+            # 1. Source Text
+            c1.info(item['source'])
+            
+            # 2. User Input
+            user_val = c2.text_input(
+                label="translate", 
+                key=f"input_{i}", 
+                label_visibility="collapsed",
+                value=item['user_input'],
+                placeholder="Type your translation here"
+            )
+            # Bind input to session state
+            st.session_state['quiz_data'][i]['user_input'] = user_val
+            
+            # 3. Feedback Area
+            if item['feedback']:
+                if "Yes" in item['feedback'] or "Correct" in item['feedback']:
+                    c3.success(item['feedback'])
+                else:
+                    c3.warning(item['feedback'])
             else:
-                st.success("Analysis Complete!")
-                
-                # Format data
-                data = {
-                    "Category": ["Original", "Improved / Translated", "Explanation", "Score"],
-                    "Content": [
-                        result.get("original_text"),
-                        result.get("improved_text"),
-                        result.get("explanation"),
-                        f"{'⭐' * int(result.get('score', 0))}/5"
-                    ]
-                }
-                
-                df = pd.DataFrame(data)
-                st.table(df)
+                if c3.button("Check", key=f"check_{i}"):
+                    with st.spinner("Checking..."):
+                        feedback = get_evaluation(item['source'], user_val, input_lang, output_lang)
+                        st.session_state['quiz_data'][i]['feedback'] = feedback
+                        st.rerun()
+    
+    st.divider()
+    
+    # Check All Button
+    if st.button("Check All Answers"):
+        progress_bar = st.progress(0)
+        for i, item in enumerate(st.session_state['quiz_data']):
+            # Check only unchecked items that have input
+            if not item['feedback'] and item['user_input']: 
+                feedback = get_evaluation(item['source'], item['user_input'], input_lang, output_lang)
+                st.session_state['quiz_data'][i]['feedback'] = feedback
+            progress_bar.progress((i + 1) / len(st.session_state['quiz_data']))
+        st.rerun()
+
+else:
+    st.info("Please generate or enter questions above to start practicing!")
