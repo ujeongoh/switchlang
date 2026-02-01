@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: switchlang
-        image: dbwjd090/switchlang:18e58616bb8dc6d82f8a12d2cc80ff4db18967bd
+        image: dbwjd090/switchlang:de3e95a06adef22b3e3befe8535ce40608b4ee44
         imagePullPolicy: IfNotPresent  # [!] use local image first
         ports:
         - containerPort: 8501          # Streamlit default port
