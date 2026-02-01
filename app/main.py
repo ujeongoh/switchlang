@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai
 import os
 
 # 1. Page Configuration
@@ -16,7 +16,7 @@ if not api_key:
     st.stop()
 
 genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-3-flash-preview')
 
 # 3. Initialize Session State
 if 'quiz_data' not in st.session_state:
